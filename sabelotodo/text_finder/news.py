@@ -1,23 +1,60 @@
-from abc import ABC
+from abc import ABC, abstractmethod
+from typing import List
 
 import requests
-
 from bs4 import BeautifulSoup
+from newspaper import Article
 
 
 class Newspaper(ABC):
-    def _get_page(self, entity):
+    URL = ""
+    LANGUAGE = ""
+
+    def _get_page(self, entity) -> str:
         r = requests.get(self.URL.format(entity))
         return r.content
 
-    def _parse_web(self, html):
+    def _parse_web(self, html) -> BeautifulSoup:
         soup = BeautifulSoup(html, 'html.parser')
         return soup
-    
-    def find_links(self):
+
+    @abstractmethod
+    def _find_links(self, parsed_web) -> List[str]:
         pass
-        mydivs = soup.findAll("div", {"class": "content search-results"})[0]
+
+    def get_texts(self, entity) -> List[str]:
+        page = self._get_page(entity)
+        parsed_web = self._parse_web(page)
+        links = self._find_links(parsed_web)
+        articles = [self._download_article(link) for link in links]
+        return articles
+
+    def _download_article(self, link) -> str:
+        article = Article(link)
+        article.download()
+        article.parse()
+        return article.text
 
 
-class ElConfidencial:
-    URL = "https://www.elconfidencial.com/buscar/2-6-1-3/0/1/10/desc/{}}/"
+class ElConfidencial(Newspaper):
+    URL = "https://www.elconfidencial.com/buscar/2-6-1-3/0/1/10/desc/{}/"
+    LANGUAGE = "es"
+
+    _NOT_VALID_LINKS = ["https://www.elconfidencial.com/buscar/",
+                        "https://www.elconfidencial.com/empresas/"]
+
+    def _find_links(self, soup_web):
+        div_resultados = soup_web.findAll("div", {"class": "content search-results"})[0]
+        soup_resultados = BeautifulSoup(str(div_resultados), 'html.parser')
+        links = list({a["href"] for a in soup_resultados.find_all('a', href=True)})
+        links = self._filter_links(links)
+        return links
+
+    def _filter_links(self, links):
+        """Some links that do not belong to news could appear. This method tries to filter them."""
+        links = [link for link in links if self._is_valid_link(link)]
+        return links
+
+    def _is_valid_link(self, link):
+        return not any([x in link for x in self._NOT_VALID_LINKS]) and \
+               len(link)  # Not Empty
