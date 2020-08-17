@@ -65,15 +65,20 @@ class Answerer:
         start_scores, end_scores = start_scores.data.numpy(), end_scores.data.numpy()
         return start_scores, end_scores, input_ids
 
-    def _get_best_answer(self, start_scores, end_scores, input_ids):
-        scores_per_text = [(np.max(start_scores[i]) + np.max(end_scores[i])) / 2 for i in range(len(input_ids))]
+    def _decode_answer_from_text(self, ids, start_scores, end_scores):
+        starting_token = np.argmax(start_scores)
+        ending_token = np.argmax(end_scores)
+        answer = self._tokenizer.decode(ids[starting_token: ending_token + 1])
+        score = (np.max(start_scores) + np.max(end_scores)) / 2 if (
+                    (len(answer) > 0) & ("[CLS]" not in answer)) else -10000
+        return answer, score
 
-        best_text_index = int(np.argmax(scores_per_text))
-        answer_ids = input_ids[best_text_index][
-                     np.argmax(start_scores[best_text_index]): np.argmax(end_scores[best_text_index]) + 1]
-        answer_text = self._tokenizer.decode(answer_ids)
-        score = scores_per_text[best_text_index]
-        return answer_text, score
+    def _get_best_answer(self, start_scores, end_scores, input_ids):
+        answers, scores = zip(*[self._decode_answer_from_text(input_ids[i], start_scores[i], end_scores[i]) for i in
+                                range(len(input_ids))])
+
+        best_text_index = np.argmax(scores)
+        return answers[best_text_index], scores[best_text_index]
 
     def _answer_on_batch(self, question: str, list_of_texts: List[str]) -> Tuple[str, float]:
         start_scores, end_scores, input_ids = self._eval_on_batch(question, list_of_texts)
